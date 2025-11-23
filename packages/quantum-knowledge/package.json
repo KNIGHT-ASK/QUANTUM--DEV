@@ -1,0 +1,28 @@
+{
+	"name": "@quantum-dev/knowledge-base",
+	"version": "0.1.0",
+	"description": "Quantum research knowledge synthesis - arXiv integration, semantic search, paper implementation",
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"scripts": {
+		"build": "tsc",
+		"test": "vitest"
+	},
+	"dependencies": {
+		"@quantum-dev/physics-core": "workspace:*"
+	},
+	"devDependencies": {
+		"@types/node": "^20.0.0",
+		"typescript": "^5.0.0",
+		"vitest": "^1.0.0"
+	},
+	"keywords": [
+		"quantum",
+		"arxiv",
+		"research",
+		"knowledge-base",
+		"quantum-dev"
+	],
+	"author": "Quantum Dev Team",
+	"license": "MIT"
+}

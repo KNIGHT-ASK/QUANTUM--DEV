@@ -1,0 +1,31 @@
+{
+	"name": "@quantum-dev/physics-core",
+	"version": "0.1.0",
+	"description": "Physics-first quantum computing core - Hilbert spaces, Hamiltonians, quantum information theory",
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"scripts": {
+		"build": "tsc",
+		"test": "vitest",
+		"lint": "eslint src --ext .ts"
+	},
+	"dependencies": {
+		"mathjs": "^15.0.0",
+		"complex.js": "^2.4.2"
+	},
+	"devDependencies": {
+		"@types/node": "^20.0.0",
+		"typescript": "^5.0.0",
+		"vitest": "^1.0.0"
+	},
+	"keywords": [
+		"quantum",
+		"physics",
+		"hilbert-space",
+		"hamiltonian",
+		"quantum-information",
+		"quantum-dev"
+	],
+	"author": "Quantum Dev Team",
+	"license": "MIT"
+}
