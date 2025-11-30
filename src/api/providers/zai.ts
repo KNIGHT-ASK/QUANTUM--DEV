@@ -3,8 +3,6 @@ import {
 	mainlandZAiModels,
 	internationalZAiDefaultModelId,
 	mainlandZAiDefaultModelId,
-	type InternationalZAiModelId,
-	type MainlandZAiModelId,
 	type ModelInfo,
 	ZAI_DEFAULT_TEMPERATURE,
 	zaiApiLineConfigs,

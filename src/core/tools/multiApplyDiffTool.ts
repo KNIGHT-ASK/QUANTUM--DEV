@@ -14,7 +14,10 @@ import { RecordSource } from "../context-tracking/FileContextTrackerTypes"
 import { unescapeHtmlEntities } from "../../utils/text-normalization"
 import { parseXmlForDiff } from "../../utils/xml"
 import { EXPERIMENT_IDS, experiments } from "../../shared/experiments"
-import { applyDiffToolLegacy } from "./applyDiffTool"
+import { applyDiffTool as applyDiffToolClass } from "./ApplyDiffTool"
+import { computeDiffStats, sanitizeUnifiedDiff } from "../diff/stats"
+import { isNativeProtocol } from "@roo-code/types"
+import { resolveToolProtocol } from "../../utils/resolveToolProtocol"
 
 interface DiffOperation {
 	path: string
@@ -58,18 +61,36 @@ export async function applyDiffTool(
 	pushToolResult: PushToolResult,
 	removeClosingTag: RemoveClosingTag,
 ) {
+	// Check if native protocol is enabled - if so, always use single-file class-based tool
+	const toolProtocol = resolveToolProtocol(cline.apiConfiguration, cline.api.getModel().info)
+	if (isNativeProtocol(toolProtocol)) {
+		return applyDiffToolClass.handle(cline, block as ToolUse<"apply_diff">, {
+			askApproval,
+			handleError,
+			pushToolResult,
+			removeClosingTag,
+			toolProtocol,
+		})
+	}
+
 	// Check if MULTI_FILE_APPLY_DIFF experiment is enabled
 	const provider = cline.providerRef.deref()
-	if (provider) {
-		const state = await provider.getState()
+	const state = await provider?.getState()
+	if (provider && state) {
 		const isMultiFileApplyDiffEnabled = experiments.isEnabled(
 			state.experiments ?? {},
 			EXPERIMENT_IDS.MULTI_FILE_APPLY_DIFF,
 		)
 
-		// If experiment is disabled, use legacy tool
+		// If experiment is disabled, use single-file class-based tool
 		if (!isMultiFileApplyDiffEnabled) {
-			return applyDiffToolLegacy(cline, block, askApproval, handleError, pushToolResult, removeClosingTag)
+			return applyDiffToolClass.handle(cline, block as ToolUse<"apply_diff">, {
+				askApproval,
+				handleError,
+				pushToolResult,
+				removeClosingTag,
+				toolProtocol,
+			})
 		}
 	}
 
@@ -247,7 +268,7 @@ Original error: ${errorMessage}`
 				await cline.say("rooignore_error", relPath)
 				updateOperationResult(relPath, {
 					status: "blocked",
-					error: formatResponse.rooIgnoreError(relPath),
+					error: formatResponse.rooIgnoreError(relPath, undefined),
 				})
 				continue
 			}
@@ -282,31 +303,70 @@ Original error: ${errorMessage}`
 				(opResult) => cline.rooProtectedController?.isWriteProtected(opResult.path) || false,
 			)
 
-			// Prepare batch diff data
-			const batchDiffs = operationsToApprove.map((opResult) => {
+			// Stream batch diffs progressively for better UX
+			const batchDiffs: Array<{
+				path: string
+				changeCount: number
+				key: string
+				content: string
+				diffStats?: { added: number; removed: number }
+				diffs?: Array<{ content: string; startLine?: number }>
+			}> = []
+
+			for (const opResult of operationsToApprove) {
 				const readablePath = getReadablePath(cline.cwd, opResult.path)
 				const changeCount = opResult.diffItems?.length || 0
 				const changeText = changeCount === 1 ? "1 change" : `${changeCount} changes`
 
-				return {
+				let unified = ""
+				try {
+					const original = await fs.readFile(opResult.absolutePath!, "utf-8")
+					const processed = !cline.api.getModel().id.includes("claude")
+						? (opResult.diffItems || []).map((item) => ({
+								...item,
+								content: item.content ? unescapeHtmlEntities(item.content) : item.content,
+							}))
+						: opResult.diffItems || []
+
+					const applyRes =
+						(await cline.diffStrategy?.applyDiff(original, processed)) ?? ({ success: false } as any)
+					const newContent = applyRes.success && applyRes.content ? applyRes.content : original
+					unified = formatResponse.createPrettyPatch(opResult.path, original, newContent)
+				} catch {
+					unified = ""
+				}
+
+				const unifiedSanitized = sanitizeUnifiedDiff(unified)
+				const stats = computeDiffStats(unifiedSanitized) || undefined
+				batchDiffs.push({
 					path: readablePath,
 					changeCount,
 					key: `${readablePath} (${changeText})`,
-					content: opResult.path, // Full relative path
+					content: unifiedSanitized,
+					diffStats: stats,
 					diffs: opResult.diffItems?.map((item) => ({
 						content: item.content,
 						startLine: item.startLine,
 					})),
-				}
-			})
+				})
 
+				// Send a partial update after each file preview is ready
+				const partialMessage = JSON.stringify({
+					tool: "appliedDiff",
+					batchDiffs,
+					isProtected: hasProtectedFiles,
+				} satisfies ClineSayTool)
+				await cline.ask("tool", partialMessage, true).catch(() => {})
+			}
+
+			// Final approval message (non-partial)
 			const completeMessage = JSON.stringify({
 				tool: "appliedDiff",
 				batchDiffs,
 				isProtected: hasProtectedFiles,
 			} satisfies ClineSayTool)
 
-			const { response, text, images } = await cline.ask("tool", completeMessage, hasProtectedFiles)
+			const { response, text, images } = await cline.ask("tool", completeMessage, false)
 
 			// Process batch response
 			if (response === "yesButtonClicked") {
@@ -418,6 +478,7 @@ Original error: ${errorMessage}`
 
 			try {
 				let originalContent: string | null = await fs.readFile(absolutePath, "utf-8")
+				let beforeContent: string | null = originalContent
 				let successCount = 0
 				let formattedError = ""
 
@@ -540,9 +601,13 @@ ${errorDetails ? `\nTechnical details:\n${errorDetails}\n` : ""}
 				if (operationsToApprove.length === 1) {
 					// Prepare common data for single file operation
 					const diffContents = diffItems.map((item) => item.content).join("\n\n")
+					const unifiedPatchRaw = formatResponse.createPrettyPatch(relPath, beforeContent!, originalContent!)
+					const unifiedPatch = sanitizeUnifiedDiff(unifiedPatchRaw)
 					const operationMessage = JSON.stringify({
 						...sharedMessageProps,
 						diff: diffContents,
+						content: unifiedPatch,
+						diffStats: computeDiffStats(unifiedPatch) || undefined,
 					} satisfies ClineSayTool)
 
 					let toolProgressStatus
@@ -671,9 +736,16 @@ ${errorDetails ? `\nTechnical details:\n${errorDetails}\n` : ""}
 			}
 		}
 
+		// Check protocol for notice formatting
+		const toolProtocol = resolveToolProtocol(cline.apiConfiguration, cline.api.getModel().info)
 		const singleBlockNotice =
 			totalSearchBlocks === 1
-				? "\n<notice>Making multiple related changes in a single apply_diff is more efficient. If other changes are needed in this file, please include them as additional SEARCH/REPLACE blocks.</notice>"
+				? isNativeProtocol(toolProtocol)
+					? "\n" +
+						JSON.stringify({
+							notice: "Making multiple related changes in a single apply_diff is more efficient. If other changes are needed in this file, please include them as additional SEARCH/REPLACE blocks.",
+						})
+					: "\n<notice>Making multiple related changes in a single apply_diff is more efficient. If other changes are needed in this file, please include them as additional SEARCH/REPLACE blocks.</notice>"
 				: ""
 
 		// Push the final result combining all operation results

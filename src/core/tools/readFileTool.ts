@@ -1,11 +1,12 @@
 import path from "path"
 import { isBinaryFile } from "isbinaryfile"
+import type { FileEntry, LineRange } from "@roo-code/types"
+import { isNativeProtocol } from "@roo-code/types"
 
 import { Task } from "../task/Task"
 import { ClineSayTool } from "../../shared/ExtensionMessage"
 import { formatResponse } from "../prompts/responses"
 import { t } from "../../i18n"
-import { ToolUse, AskApproval, HandleError, PushToolResult, RemoveClosingTag } from "../../shared/tools"
 import { RecordSource } from "../context-tracking/FileContextTrackerTypes"
 import { isPathOutsideWorkspace } from "../../utils/pathUtils"
 import { getReadablePath } from "../../utils/path"
@@ -14,6 +15,7 @@ import { readLines } from "../../integrations/misc/read-lines"
 import { extractTextFromFile, addLineNumbers, getSupportedBinaryFormats } from "../../integrations/misc/extract-text"
 import { parseSourceCodeDefinitionsForFile } from "../../services/tree-sitter"
 import { parseXml } from "../../utils/xml"
+import { resolveToolProtocol } from "../../utils/resolveToolProtocol"
 import {
 	DEFAULT_MAX_IMAGE_FILE_SIZE_MB,
 	DEFAULT_MAX_TOTAL_IMAGE_SIZE_MB,
@@ -23,50 +25,10 @@ import {
 	ImageMemoryTracker,
 } from "./helpers/imageHelpers"
 import { validateFileTokenBudget, truncateFileContent } from "./helpers/fileTokenBudget"
+import { truncateDefinitionsToLineLimit } from "./helpers/truncateDefinitions"
+import { BaseTool, ToolCallbacks } from "./BaseTool"
+import type { ToolUse } from "../../shared/tools"
 
-export function getReadFileToolDescription(blockName: string, blockParams: any): string {
-	// Handle both single path and multiple files via args
-	if (blockParams.args) {
-		try {
-			const parsed = parseXml(blockParams.args) as any
-			const files = Array.isArray(parsed.file) ? parsed.file : [parsed.file].filter(Boolean)
-			const paths = files.map((f: any) => f?.path).filter(Boolean) as string[]
-
-			if (paths.length === 0) {
-				return `[${blockName} with no valid paths]`
-			} else if (paths.length === 1) {
-				// Modified part for single file
-				return `[${blockName} for '${paths[0]}'. Reading multiple files at once is more efficient for the LLM. If other files are relevant to your current task, please read them simultaneously.]`
-			} else if (paths.length <= 3) {
-				const pathList = paths.map((p) => `'${p}'`).join(", ")
-				return `[${blockName} for ${pathList}]`
-			} else {
-				return `[${blockName} for ${paths.length} files]`
-			}
-		} catch (error) {
-			console.error("Failed to parse read_file args XML for description:", error)
-			return `[${blockName} with unparsable args]`
-		}
-	} else if (blockParams.path) {
-		// Fallback for legacy single-path usage
-		// Modified part for single file (legacy)
-		return `[${blockName} for '${blockParams.path}'. Reading multiple files at once is more efficient for the LLM. If other files are relevant to your current task, please read them simultaneously.]`
-	} else {
-		return `[${blockName} with missing path/args]`
-	}
-}
-// Types
-interface LineRange {
-	start: number
-	end: number
-}
-
-interface FileEntry {
-	path?: string
-	lineRanges?: LineRange[]
-}
-
-// New interface to track file processing state
 interface FileResult {
 	path: string
 	status: "approved" | "denied" | "blocked" | "error" | "pending"
@@ -74,66 +36,31 @@ interface FileResult {
 	error?: string
 	notice?: string
 	lineRanges?: LineRange[]
-	xmlContent?: string // Final XML content for this file
-	imageDataUrl?: string // Image data URL for image files
-	feedbackText?: string // User feedback text from approval/denial
-	feedbackImages?: any[] // User feedback images from approval/denial
+	xmlContent?: string
+	nativeContent?: string
+	imageDataUrl?: string
+	feedbackText?: string
+	feedbackImages?: any[]
 }
 
-export async function readFileTool(
-	cline: Task,
-	block: ToolUse,
-	askApproval: AskApproval,
-	handleError: HandleError,
-	pushToolResult: PushToolResult,
-	_removeClosingTag: RemoveClosingTag,
-) {
-	const argsXmlTag: string | undefined = block.params.args
-	const legacyPath: string | undefined = block.params.path
-	const legacyStartLineStr: string | undefined = block.params.start_line
-	const legacyEndLineStr: string | undefined = block.params.end_line
+export class ReadFileTool extends BaseTool<"read_file"> {
+	readonly name = "read_file" as const
 
-	// Check if the current model supports images at the beginning
-	const modelInfo = cline.api.getModel().info
-	const supportsImages = modelInfo.supportsImages ?? false
+	parseLegacy(params: Partial<Record<string, string>>): { files: FileEntry[] } {
+		const argsXmlTag = params.args
+		const legacyPath = params.path
+		const legacyStartLineStr = params.start_line
+		const legacyEndLineStr = params.end_line
 
-	// Handle partial message first
-	if (block.partial) {
-		let filePath = ""
-		// Prioritize args for partial, then legacy path
+		const fileEntries: FileEntry[] = []
+
+		// XML args format
 		if (argsXmlTag) {
-			const match = argsXmlTag.match(/<file>.*?<path>([^<]+)<\/path>/s)
-			if (match) filePath = match[1]
-		}
-		if (!filePath && legacyPath) {
-			// If args didn't yield a path, try legacy
-			filePath = legacyPath
-		}
-
-		const fullPath = filePath ? path.resolve(cline.cwd, filePath) : ""
-		const sharedMessageProps: ClineSayTool = {
-			tool: "readFile",
-			path: getReadablePath(cline.cwd, filePath),
-			isOutsideWorkspace: filePath ? isPathOutsideWorkspace(fullPath) : false,
-		}
-		const partialMessage = JSON.stringify({
-			...sharedMessageProps,
-			content: undefined,
-		} satisfies ClineSayTool)
-		await cline.ask("tool", partialMessage, block.partial).catch(() => {})
-		return
-	}
-
-	const fileEntries: FileEntry[] = []
-
-	if (argsXmlTag) {
-		// Parse file entries from XML (new multi-file format)
-		try {
 			const parsed = parseXml(argsXmlTag) as any
 			const files = Array.isArray(parsed.file) ? parsed.file : [parsed.file].filter(Boolean)
 
 			for (const file of files) {
-				if (!file.path) continue // Skip if no path in a file entry
+				if (!file.path) continue
 
 				const fileEntry: FileEntry = {
 					path: file.path,
@@ -143,7 +70,7 @@ export async function readFileTool(
 				if (file.line_range) {
 					const ranges = Array.isArray(file.line_range) ? file.line_range : [file.line_range]
 					for (const range of ranges) {
-						const match = String(range).match(/(\d+)-(\d+)/) // Ensure range is treated as string
+						const match = String(range).match(/(\d+)-(\d+)/)
 						if (match) {
 							const [, start, end] = match.map(Number)
 							if (!isNaN(start) && !isNaN(end)) {
@@ -154,128 +81,208 @@ export async function readFileTool(
 				}
 				fileEntries.push(fileEntry)
 			}
-		} catch (error) {
-			const errorMessage = `Failed to parse read_file XML args: ${error instanceof Error ? error.message : String(error)}`
-			await handleError("parsing read_file args", new Error(errorMessage))
-			pushToolResult(`<files><error>${errorMessage}</error></files>`)
+
+			return { files: fileEntries }
+		}
+
+		// Legacy single file path
+		if (legacyPath) {
+			const fileEntry: FileEntry = {
+				path: legacyPath,
+				lineRanges: [],
+			}
+
+			if (legacyStartLineStr && legacyEndLineStr) {
+				const start = parseInt(legacyStartLineStr, 10)
+				const end = parseInt(legacyEndLineStr, 10)
+				if (!isNaN(start) && !isNaN(end) && start > 0 && end > 0) {
+					fileEntry.lineRanges?.push({ start, end })
+				}
+			}
+			fileEntries.push(fileEntry)
+		}
+
+		return { files: fileEntries }
+	}
+
+	async execute(params: { files: FileEntry[] }, task: Task, callbacks: ToolCallbacks): Promise<void> {
+		const { handleError, pushToolResult, toolProtocol } = callbacks
+		const fileEntries = params.files
+		const modelInfo = task.api.getModel().info
+		const protocol = resolveToolProtocol(task.apiConfiguration, modelInfo)
+		const useNative = isNativeProtocol(protocol)
+
+		if (!fileEntries || fileEntries.length === 0) {
+			task.consecutiveMistakeCount++
+			task.recordToolError("read_file")
+			const errorMsg = await task.sayAndCreateMissingParamError("read_file", "args (containing valid file paths)")
+			const errorResult = useNative ? `Error: ${errorMsg}` : `<files><error>${errorMsg}</error></files>`
+			pushToolResult(errorResult)
 			return
 		}
-	} else if (legacyPath) {
-		// Handle legacy single file path as a fallback
-		console.warn("[readFileTool] Received legacy 'path' parameter. Consider updating to use 'args' structure.")
 
-		const fileEntry: FileEntry = {
-			path: legacyPath,
-			lineRanges: [],
-		}
+		const supportsImages = modelInfo.supportsImages ?? false
 
-		if (legacyStartLineStr && legacyEndLineStr) {
-			const start = parseInt(legacyStartLineStr, 10)
-			const end = parseInt(legacyEndLineStr, 10)
-			if (!isNaN(start) && !isNaN(end) && start > 0 && end > 0) {
-				fileEntry.lineRanges?.push({ start, end })
-			} else {
-				console.warn(
-					`[readFileTool] Invalid legacy line range for ${legacyPath}: start='${legacyStartLineStr}', end='${legacyEndLineStr}'`,
-				)
-			}
-		}
-		fileEntries.push(fileEntry)
-	}
+		const fileResults: FileResult[] = fileEntries.map((entry) => ({
+			path: entry.path,
+			status: "pending",
+			lineRanges: entry.lineRanges,
+		}))
 
-	// If, after trying both new and legacy, no valid file entries are found.
-	if (fileEntries.length === 0) {
-		cline.consecutiveMistakeCount++
-		cline.recordToolError("read_file")
-		const errorMsg = await cline.sayAndCreateMissingParamError("read_file", "args (containing valid file paths)")
-		pushToolResult(`<files><error>${errorMsg}</error></files>`)
-		return
-	}
-
-	// Create an array to track the state of each file
-	const fileResults: FileResult[] = fileEntries.map((entry) => ({
-		path: entry.path || "",
-		status: "pending",
-		lineRanges: entry.lineRanges,
-	}))
-
-	// Function to update file result status
-	const updateFileResult = (path: string, updates: Partial<FileResult>) => {
-		const index = fileResults.findIndex((result) => result.path === path)
-		if (index !== -1) {
-			fileResults[index] = { ...fileResults[index], ...updates }
-		}
-	}
-
-	try {
-		// First validate all files and prepare for batch approval
-		const filesToApprove: FileResult[] = []
-
-		for (let i = 0; i < fileResults.length; i++) {
-			const fileResult = fileResults[i]
-			const relPath = fileResult.path
-			const fullPath = path.resolve(cline.cwd, relPath)
-
-			// Validate line ranges first
-			if (fileResult.lineRanges) {
-				let hasRangeError = false
-				for (const range of fileResult.lineRanges) {
-					if (range.start > range.end) {
-						const errorMsg = "Invalid line range: end line cannot be less than start line"
-						updateFileResult(relPath, {
-							status: "blocked",
-							error: errorMsg,
-							xmlContent: `<file><path>${relPath}</path><error>Error reading file: ${errorMsg}</error></file>`,
-						})
-						await handleError(`reading file ${relPath}`, new Error(errorMsg))
-						hasRangeError = true
-						break
-					}
-					if (isNaN(range.start) || isNaN(range.end)) {
-						const errorMsg = "Invalid line range values"
-						updateFileResult(relPath, {
-							status: "blocked",
-							error: errorMsg,
-							xmlContent: `<file><path>${relPath}</path><error>Error reading file: ${errorMsg}</error></file>`,
-						})
-						await handleError(`reading file ${relPath}`, new Error(errorMsg))
-						hasRangeError = true
-						break
-					}
-				}
-				if (hasRangeError) continue
-			}
-
-			// Then check RooIgnore validation
-			if (fileResult.status === "pending") {
-				const accessAllowed = cline.rooIgnoreController?.validateAccess(relPath)
-				if (!accessAllowed) {
-					await cline.say("rooignore_error", relPath)
-					const errorMsg = formatResponse.rooIgnoreError(relPath)
-					updateFileResult(relPath, {
-						status: "blocked",
-						error: errorMsg,
-						xmlContent: `<file><path>${relPath}</path><error>${errorMsg}</error></file>`,
-					})
-					continue
-				}
-
-				// Add to files that need approval
-				filesToApprove.push(fileResult)
+		const updateFileResult = (filePath: string, updates: Partial<FileResult>) => {
+			const index = fileResults.findIndex((result) => result.path === filePath)
+			if (index !== -1) {
+				fileResults[index] = { ...fileResults[index], ...updates }
 			}
 		}
 
-		// Handle batch approval if there are multiple files to approve
-		if (filesToApprove.length > 1) {
-			const { maxReadFileLine = -1 } = (await cline.providerRef.deref()?.getState()) ?? {}
+		try {
+			const filesToApprove: FileResult[] = []
 
-			// Prepare batch file data
-			const batchFiles = filesToApprove.map((fileResult) => {
+			for (const fileResult of fileResults) {
 				const relPath = fileResult.path
-				const fullPath = path.resolve(cline.cwd, relPath)
-				const isOutsideWorkspace = isPathOutsideWorkspace(fullPath)
+				const fullPath = path.resolve(task.cwd, relPath)
 
-				// Create line snippet for this file
+				if (fileResult.lineRanges) {
+					let hasRangeError = false
+					for (const range of fileResult.lineRanges) {
+						if (range.start > range.end) {
+							const errorMsg = "Invalid line range: end line cannot be less than start line"
+							updateFileResult(relPath, {
+								status: "blocked",
+								error: errorMsg,
+								xmlContent: `<file><path>${relPath}</path><error>Error reading file: ${errorMsg}</error></file>`,
+								nativeContent: `File: ${relPath}\nError: Error reading file: ${errorMsg}`,
+							})
+							await task.say("error", `Error reading file ${relPath}: ${errorMsg}`)
+							hasRangeError = true
+							break
+						}
+						if (isNaN(range.start) || isNaN(range.end)) {
+							const errorMsg = "Invalid line range values"
+							updateFileResult(relPath, {
+								status: "blocked",
+								error: errorMsg,
+								xmlContent: `<file><path>${relPath}</path><error>Error reading file: ${errorMsg}</error></file>`,
+								nativeContent: `File: ${relPath}\nError: Error reading file: ${errorMsg}`,
+							})
+							await task.say("error", `Error reading file ${relPath}: ${errorMsg}`)
+							hasRangeError = true
+							break
+						}
+					}
+					if (hasRangeError) continue
+				}
+
+				if (fileResult.status === "pending") {
+					const accessAllowed = task.rooIgnoreController?.validateAccess(relPath)
+					if (!accessAllowed) {
+						await task.say("rooignore_error", relPath)
+						const errorMsg = formatResponse.rooIgnoreError(relPath)
+						updateFileResult(relPath, {
+							status: "blocked",
+							error: errorMsg,
+							xmlContent: `<file><path>${relPath}</path><error>${errorMsg}</error></file>`,
+							nativeContent: `File: ${relPath}\nError: ${errorMsg}`,
+						})
+						continue
+					}
+
+					filesToApprove.push(fileResult)
+				}
+			}
+
+			if (filesToApprove.length > 1) {
+				const { maxReadFileLine = -1 } = (await task.providerRef.deref()?.getState()) ?? {}
+
+				const batchFiles = filesToApprove.map((fileResult) => {
+					const relPath = fileResult.path
+					const fullPath = path.resolve(task.cwd, relPath)
+					const isOutsideWorkspace = isPathOutsideWorkspace(fullPath)
+
+					let lineSnippet = ""
+					if (fileResult.lineRanges && fileResult.lineRanges.length > 0) {
+						const ranges = fileResult.lineRanges.map((range) =>
+							t("tools:readFile.linesRange", { start: range.start, end: range.end }),
+						)
+						lineSnippet = ranges.join(", ")
+					} else if (maxReadFileLine === 0) {
+						lineSnippet = t("tools:readFile.definitionsOnly")
+					} else if (maxReadFileLine > 0) {
+						lineSnippet = t("tools:readFile.maxLines", { max: maxReadFileLine })
+					}
+
+					const readablePath = getReadablePath(task.cwd, relPath)
+					const key = `${readablePath}${lineSnippet ? ` (${lineSnippet})` : ""}`
+
+					return { path: readablePath, lineSnippet, isOutsideWorkspace, key, content: fullPath }
+				})
+
+				const completeMessage = JSON.stringify({ tool: "readFile", batchFiles } satisfies ClineSayTool)
+				const { response, text, images } = await task.ask("tool", completeMessage, false)
+
+				if (response === "yesButtonClicked") {
+					if (text) await task.say("user_feedback", text, images)
+					filesToApprove.forEach((fileResult) => {
+						updateFileResult(fileResult.path, {
+							status: "approved",
+							feedbackText: text,
+							feedbackImages: images,
+						})
+					})
+				} else if (response === "noButtonClicked") {
+					if (text) await task.say("user_feedback", text, images)
+					task.didRejectTool = true
+					filesToApprove.forEach((fileResult) => {
+						updateFileResult(fileResult.path, {
+							status: "denied",
+							xmlContent: `<file><path>${fileResult.path}</path><status>Denied by user</status></file>`,
+							nativeContent: `File: ${fileResult.path}\nStatus: Denied by user`,
+							feedbackText: text,
+							feedbackImages: images,
+						})
+					})
+				} else {
+					try {
+						const individualPermissions = JSON.parse(text || "{}")
+						let hasAnyDenial = false
+
+						batchFiles.forEach((batchFile, index) => {
+							const fileResult = filesToApprove[index]
+							const approved = individualPermissions[batchFile.key] === true
+
+							if (approved) {
+								updateFileResult(fileResult.path, { status: "approved" })
+							} else {
+								hasAnyDenial = true
+								updateFileResult(fileResult.path, {
+									status: "denied",
+									xmlContent: `<file><path>${fileResult.path}</path><status>Denied by user</status></file>`,
+									nativeContent: `File: ${fileResult.path}\nStatus: Denied by user`,
+								})
+							}
+						})
+
+						if (hasAnyDenial) task.didRejectTool = true
+					} catch (error) {
+						console.error("Failed to parse individual permissions:", error)
+						task.didRejectTool = true
+						filesToApprove.forEach((fileResult) => {
+							updateFileResult(fileResult.path, {
+								status: "denied",
+								xmlContent: `<file><path>${fileResult.path}</path><status>Denied by user</status></file>`,
+								nativeContent: `File: ${fileResult.path}\nStatus: Denied by user`,
+							})
+						})
+					}
+				}
+			} else if (filesToApprove.length === 1) {
+				const fileResult = filesToApprove[0]
+				const relPath = fileResult.path
+				const fullPath = path.resolve(task.cwd, relPath)
+				const isOutsideWorkspace = isPathOutsideWorkspace(fullPath)
+				const { maxReadFileLine = -1 } = (await task.providerRef.deref()?.getState()) ?? {}
+
 				let lineSnippet = ""
 				if (fileResult.lineRanges && fileResult.lineRanges.length > 0) {
 					const ranges = fileResult.lineRanges.map((range) =>
@@ -288,459 +295,458 @@ export async function readFileTool(
 					lineSnippet = t("tools:readFile.maxLines", { max: maxReadFileLine })
 				}
 
-				const readablePath = getReadablePath(cline.cwd, relPath)
-				const key = `${readablePath}${lineSnippet ? ` (${lineSnippet})` : ""}`
-
-				return {
-					path: readablePath,
-					lineSnippet,
+				const completeMessage = JSON.stringify({
+					tool: "readFile",
+					path: getReadablePath(task.cwd, relPath),
 					isOutsideWorkspace,
-					key,
-					content: fullPath, // Include full path for content
-				}
-			})
+					content: fullPath,
+					reason: lineSnippet,
+				} satisfies ClineSayTool)
 
-			const completeMessage = JSON.stringify({
-				tool: "readFile",
-				batchFiles,
-			} satisfies ClineSayTool)
+				const { response, text, images } = await task.ask("tool", completeMessage, false)
 
-			const { response, text, images } = await cline.ask("tool", completeMessage, false)
-
-			// Process batch response
-			if (response === "yesButtonClicked") {
-				// Approve all files
-				if (text) {
-					await cline.say("user_feedback", text, images)
-				}
-				filesToApprove.forEach((fileResult) => {
-					updateFileResult(fileResult.path, {
-						status: "approved",
-						feedbackText: text,
-						feedbackImages: images,
-					})
-				})
-			} else if (response === "noButtonClicked") {
-				// Deny all files
-				if (text) {
-					await cline.say("user_feedback", text, images)
-				}
-				cline.didRejectTool = true
-				filesToApprove.forEach((fileResult) => {
-					updateFileResult(fileResult.path, {
+				if (response !== "yesButtonClicked") {
+					if (text) await task.say("user_feedback", text, images)
+					task.didRejectTool = true
+					updateFileResult(relPath, {
 						status: "denied",
-						xmlContent: `<file><path>${fileResult.path}</path><status>Denied by user</status></file>`,
+						xmlContent: `<file><path>${relPath}</path><status>Denied by user</status></file>`,
+						nativeContent: `File: ${relPath}\nStatus: Denied by user`,
 						feedbackText: text,
 						feedbackImages: images,
 					})
-				})
-			} else {
-				// Handle individual permissions from objectResponse
-				// if (text) {
-				// 	await cline.say("user_feedback", text, images)
-				// }
+				} else {
+					if (text) await task.say("user_feedback", text, images)
+					updateFileResult(relPath, { status: "approved", feedbackText: text, feedbackImages: images })
+				}
+			}
+
+			const imageMemoryTracker = new ImageMemoryTracker()
+			const state = await task.providerRef.deref()?.getState()
+			const {
+				maxReadFileLine = -1,
+				maxImageFileSize = DEFAULT_MAX_IMAGE_FILE_SIZE_MB,
+				maxTotalImageSize = DEFAULT_MAX_TOTAL_IMAGE_SIZE_MB,
+			} = state ?? {}
+
+			for (const fileResult of fileResults) {
+				if (fileResult.status !== "approved") continue
+
+				const relPath = fileResult.path
+				const fullPath = path.resolve(task.cwd, relPath)
 
 				try {
-					const individualPermissions = JSON.parse(text || "{}")
-					let hasAnyDenial = false
+					const [totalLines, isBinary] = await Promise.all([countFileLines(fullPath), isBinaryFile(fullPath)])
 
-					batchFiles.forEach((batchFile, index) => {
-						const fileResult = filesToApprove[index]
-						const approved = individualPermissions[batchFile.key] === true
+					if (isBinary) {
+						const fileExtension = path.extname(relPath).toLowerCase()
+						const supportedBinaryFormats = getSupportedBinaryFormats()
 
-						if (approved) {
-							updateFileResult(fileResult.path, {
-								status: "approved",
-							})
-						} else {
-							hasAnyDenial = true
-							updateFileResult(fileResult.path, {
-								status: "denied",
-								xmlContent: `<file><path>${fileResult.path}</path><status>Denied by user</status></file>`,
-							})
-						}
-					})
+						if (isSupportedImageFormat(fileExtension)) {
+							try {
+								const validationResult = await validateImageForProcessing(
+									fullPath,
+									supportsImages,
+									maxImageFileSize,
+									maxTotalImageSize,
+									imageMemoryTracker.getTotalMemoryUsed(),
+								)
 
-					if (hasAnyDenial) {
-						cline.didRejectTool = true
-					}
-				} catch (error) {
-					// Fallback: if JSON parsing fails, deny all files
-					console.error("Failed to parse individual permissions:", error)
-					cline.didRejectTool = true
-					filesToApprove.forEach((fileResult) => {
-						updateFileResult(fileResult.path, {
-							status: "denied",
-							xmlContent: `<file><path>${fileResult.path}</path><status>Denied by user</status></file>`,
-						})
-					})
-				}
-			}
-		} else if (filesToApprove.length === 1) {
-			// Handle single file approval (existing logic)
-			const fileResult = filesToApprove[0]
-			const relPath = fileResult.path
-			const fullPath = path.resolve(cline.cwd, relPath)
-			const isOutsideWorkspace = isPathOutsideWorkspace(fullPath)
-			const { maxReadFileLine = -1 } = (await cline.providerRef.deref()?.getState()) ?? {}
+								if (!validationResult.isValid) {
+									await task.fileContextTracker.trackFileContext(relPath, "read_tool" as RecordSource)
+									updateFileResult(relPath, {
+										xmlContent: `<file><path>${relPath}</path>\n<notice>${validationResult.notice}</notice>\n</file>`,
+										nativeContent: `File: ${relPath}\nNote: ${validationResult.notice}`,
+									})
+									continue
+								}
 
-			// Create line snippet for approval message
-			let lineSnippet = ""
-			if (fileResult.lineRanges && fileResult.lineRanges.length > 0) {
-				const ranges = fileResult.lineRanges.map((range) =>
-					t("tools:readFile.linesRange", { start: range.start, end: range.end }),
-				)
-				lineSnippet = ranges.join(", ")
-			} else if (maxReadFileLine === 0) {
-				lineSnippet = t("tools:readFile.definitionsOnly")
-			} else if (maxReadFileLine > 0) {
-				lineSnippet = t("tools:readFile.maxLines", { max: maxReadFileLine })
-			}
-
-			const completeMessage = JSON.stringify({
-				tool: "readFile",
-				path: getReadablePath(cline.cwd, relPath),
-				isOutsideWorkspace,
-				content: fullPath,
-				reason: lineSnippet,
-			} satisfies ClineSayTool)
-
-			const { response, text, images } = await cline.ask("tool", completeMessage, false)
-
-			if (response !== "yesButtonClicked") {
-				// Handle both messageResponse and noButtonClicked with text
-				if (text) {
-					await cline.say("user_feedback", text, images)
-				}
-				cline.didRejectTool = true
-
-				updateFileResult(relPath, {
-					status: "denied",
-					xmlContent: `<file><path>${relPath}</path><status>Denied by user</status></file>`,
-					feedbackText: text,
-					feedbackImages: images,
-				})
-			} else {
-				// Handle yesButtonClicked with text
-				if (text) {
-					await cline.say("user_feedback", text, images)
-				}
-
-				updateFileResult(relPath, {
-					status: "approved",
-					feedbackText: text,
-					feedbackImages: images,
-				})
-			}
-		}
-
-		// Track total image memory usage across all files
-		const imageMemoryTracker = new ImageMemoryTracker()
-		const state = await cline.providerRef.deref()?.getState()
-		const {
-			maxReadFileLine = -1,
-			maxImageFileSize = DEFAULT_MAX_IMAGE_FILE_SIZE_MB,
-			maxTotalImageSize = DEFAULT_MAX_TOTAL_IMAGE_SIZE_MB,
-		} = state ?? {}
-
-		// Then process only approved files
-		for (const fileResult of fileResults) {
-			// Skip files that weren't approved
-			if (fileResult.status !== "approved") {
-				continue
-			}
-
-			const relPath = fileResult.path
-			const fullPath = path.resolve(cline.cwd, relPath)
-
-			// Process approved files
-			try {
-				const [totalLines, isBinary] = await Promise.all([countFileLines(fullPath), isBinaryFile(fullPath)])
-
-				// Handle binary files (but allow specific file types that extractTextFromFile can handle)
-				if (isBinary) {
-					const fileExtension = path.extname(relPath).toLowerCase()
-					const supportedBinaryFormats = getSupportedBinaryFormats()
-
-					// Check if it's a supported image format
-					if (isSupportedImageFormat(fileExtension)) {
-						try {
-							// Validate image for processing
-							const validationResult = await validateImageForProcessing(
-								fullPath,
-								supportsImages,
-								maxImageFileSize,
-								maxTotalImageSize,
-								imageMemoryTracker.getTotalMemoryUsed(),
-							)
-
-							if (!validationResult.isValid) {
-								// Track file read
-								await cline.fileContextTracker.trackFileContext(relPath, "read_tool" as RecordSource)
+								const imageResult = await processImageFile(fullPath)
+								imageMemoryTracker.addMemoryUsage(imageResult.sizeInMB)
+								await task.fileContextTracker.trackFileContext(relPath, "read_tool" as RecordSource)
 
 								updateFileResult(relPath, {
-									xmlContent: `<file><path>${relPath}</path>\n<notice>${validationResult.notice}</notice>\n</file>`,
+									xmlContent: `<file><path>${relPath}</path>\n<notice>${imageResult.notice}</notice>\n</file>`,
+									nativeContent: `File: ${relPath}\nNote: ${imageResult.notice}`,
+									imageDataUrl: imageResult.dataUrl,
 								})
 								continue
+							} catch (error) {
+								const errorMsg = error instanceof Error ? error.message : String(error)
+								updateFileResult(relPath, {
+									status: "error",
+									error: `Error reading image file: ${errorMsg}`,
+									xmlContent: `<file><path>${relPath}</path><error>Error reading image file: ${errorMsg}</error></file>`,
+									nativeContent: `File: ${relPath}\nError: Error reading image file: ${errorMsg}`,
+								})
+								await task.say("error", `Error reading image file ${relPath}: ${errorMsg}`)
+								continue
 							}
+						}
 
-							// Process the image
-							const imageResult = await processImageFile(fullPath)
-
-							// Track memory usage for this image
-							imageMemoryTracker.addMemoryUsage(imageResult.sizeInMB)
-
-							// Track file read
-							await cline.fileContextTracker.trackFileContext(relPath, "read_tool" as RecordSource)
-
-							// Store image data URL separately - NOT in XML
+						if (supportedBinaryFormats && supportedBinaryFormats.includes(fileExtension)) {
+							// Fall through to extractTextFromFile
+						} else {
+							const fileFormat = fileExtension.slice(1) || "bin"
 							updateFileResult(relPath, {
-								xmlContent: `<file><path>${relPath}</path>\n<notice>${imageResult.notice}</notice>\n</file>`,
-								imageDataUrl: imageResult.dataUrl,
+								notice: `Binary file format: ${fileFormat}`,
+								xmlContent: `<file><path>${relPath}</path>\n<binary_file format="${fileFormat}">Binary file - content not displayed</binary_file>\n</file>`,
+								nativeContent: `File: ${relPath}\nBinary file (${fileFormat}) - content not displayed`,
 							})
-							continue
-						} catch (error) {
-							const errorMsg = error instanceof Error ? error.message : String(error)
-							updateFileResult(relPath, {
-								status: "error",
-								error: `Error reading image file: ${errorMsg}`,
-								xmlContent: `<file><path>${relPath}</path><error>Error reading image file: ${errorMsg}</error></file>`,
-							})
-							await handleError(
-								`reading image file ${relPath}`,
-								error instanceof Error ? error : new Error(errorMsg),
-							)
 							continue
 						}
 					}
 
-					// Check if it's a supported binary format that can be processed
-					if (supportedBinaryFormats && supportedBinaryFormats.includes(fileExtension)) {
-						// For supported binary formats (.pdf, .docx, .ipynb), continue to extractTextFromFile
-						// Fall through to the normal extractTextFromFile processing below
-					} else {
-						// Handle unknown binary format
-						const fileFormat = fileExtension.slice(1) || "bin" // Remove the dot, fallback to "bin"
+					if (fileResult.lineRanges && fileResult.lineRanges.length > 0) {
+						const rangeResults: string[] = []
+						const nativeRangeResults: string[] = []
+
+						for (const range of fileResult.lineRanges) {
+							const content = addLineNumbers(
+								await readLines(fullPath, range.end - 1, range.start - 1),
+								range.start,
+							)
+							const lineRangeAttr = ` lines="${range.start}-${range.end}"`
+							rangeResults.push(`<content${lineRangeAttr}>\n${content}</content>`)
+							nativeRangeResults.push(`Lines ${range.start}-${range.end}:\n${content}`)
+						}
+
 						updateFileResult(relPath, {
-							notice: `Binary file format: ${fileFormat}`,
-							xmlContent: `<file><path>${relPath}</path>\n<binary_file format="${fileFormat}">Binary file - content not displayed</binary_file>\n</file>`,
+							xmlContent: `<file><path>${relPath}</path>\n${rangeResults.join("\n")}\n</file>`,
+							nativeContent: `File: ${relPath}\n${nativeRangeResults.join("\n\n")}`,
 						})
 						continue
 					}
-				}
 
-				// Handle range reads (bypass maxReadFileLine)
-				if (fileResult.lineRanges && fileResult.lineRanges.length > 0) {
-					const rangeResults: string[] = []
-					for (const range of fileResult.lineRanges) {
-						const content = addLineNumbers(
-							await readLines(fullPath, range.end - 1, range.start - 1),
-							range.start,
-						)
-						const lineRangeAttr = ` lines="${range.start}-${range.end}"`
-						rangeResults.push(`<content${lineRangeAttr}>\n${content}</content>`)
+					if (maxReadFileLine === 0) {
+						try {
+							const defResult = await parseSourceCodeDefinitionsForFile(
+								fullPath,
+								task.rooIgnoreController,
+							)
+							if (defResult) {
+								const notice = `Showing only ${maxReadFileLine} of ${totalLines} total lines. Use line_range if you need to read more lines`
+								updateFileResult(relPath, {
+									xmlContent: `<file><path>${relPath}</path>\n<list_code_definition_names>${defResult}</list_code_definition_names>\n<notice>${notice}</notice>\n</file>`,
+									nativeContent: `File: ${relPath}\nCode Definitions:\n${defResult}\n\nNote: ${notice}`,
+								})
+							}
+						} catch (error) {
+							if (error instanceof Error && error.message.startsWith("Unsupported language:")) {
+								console.warn(`[read_file] Warning: ${error.message}`)
+							} else {
+								console.error(
+									`[read_file] Unhandled error: ${error instanceof Error ? error.message : String(error)}`,
+								)
+							}
+						}
+						continue
 					}
-					updateFileResult(relPath, {
-						xmlContent: `<file><path>${relPath}</path>\n${rangeResults.join("\n")}\n</file>`,
-					})
-					continue
-				}
 
-				// Handle definitions-only mode
-				if (maxReadFileLine === 0) {
-					try {
-						const defResult = await parseSourceCodeDefinitionsForFile(fullPath, cline.rooIgnoreController)
-						if (defResult) {
-							let xmlInfo = `<notice>Showing only ${maxReadFileLine} of ${totalLines} total lines. Use line_range if you need to read more lines</notice>\n`
+					if (maxReadFileLine > 0 && totalLines > maxReadFileLine) {
+						const content = addLineNumbers(await readLines(fullPath, maxReadFileLine - 1, 0))
+						const lineRangeAttr = ` lines="1-${maxReadFileLine}"`
+						let xmlInfo = `<content${lineRangeAttr}>\n${content}</content>\n`
+						let nativeInfo = `Lines 1-${maxReadFileLine}:\n${content}\n`
+
+						try {
+							const defResult = await parseSourceCodeDefinitionsForFile(
+								fullPath,
+								task.rooIgnoreController,
+							)
+							if (defResult) {
+								const truncatedDefs = truncateDefinitionsToLineLimit(defResult, maxReadFileLine)
+								xmlInfo += `<list_code_definition_names>${truncatedDefs}</list_code_definition_names>\n`
+								nativeInfo += `\nCode Definitions:\n${truncatedDefs}\n`
+							}
+
+							const notice = `Showing only ${maxReadFileLine} of ${totalLines} total lines. Use line_range if you need to read more lines`
+							xmlInfo += `<notice>${notice}</notice>\n`
+							nativeInfo += `\nNote: ${notice}`
+
 							updateFileResult(relPath, {
-								xmlContent: `<file><path>${relPath}</path>\n<list_code_definition_names>${defResult}</list_code_definition_names>\n${xmlInfo}</file>`,
+								xmlContent: `<file><path>${relPath}</path>\n${xmlInfo}</file>`,
+								nativeContent: `File: ${relPath}\n${nativeInfo}`,
 							})
+						} catch (error) {
+							if (error instanceof Error && error.message.startsWith("Unsupported language:")) {
+								console.warn(`[read_file] Warning: ${error.message}`)
+							} else {
+								console.error(
+									`[read_file] Unhandled error: ${error instanceof Error ? error.message : String(error)}`,
+								)
+							}
 						}
-					} catch (error) {
-						if (error instanceof Error && error.message.startsWith("Unsupported language:")) {
-							console.warn(`[read_file] Warning: ${error.message}`)
+						continue
+					}
+
+					const modelInfo = task.api.getModel().info
+					const { contextTokens } = task.getTokenUsage()
+					const contextWindow = modelInfo.contextWindow
+
+					const budgetResult = await validateFileTokenBudget(fullPath, contextWindow, contextTokens || 0)
+
+					let content = await extractTextFromFile(fullPath)
+					let xmlInfo = ""
+
+					let nativeInfo = ""
+
+					if (budgetResult.shouldTruncate && budgetResult.maxChars !== undefined) {
+						const truncateResult = truncateFileContent(
+							content,
+							budgetResult.maxChars,
+							content.length,
+							budgetResult.isPreview,
+						)
+						content = truncateResult.content
+
+						let displayedLines = content.length === 0 ? 0 : content.split(/\r?\n/).length
+						if (displayedLines > 0 && content.endsWith("\n")) {
+							displayedLines--
+						}
+						const lineRangeAttr = displayedLines > 0 ? ` lines="1-${displayedLines}"` : ""
+						xmlInfo =
+							content.length > 0 ? `<content${lineRangeAttr}>\n${content}</content>\n` : `<content/>`
+						xmlInfo += `<notice>${truncateResult.notice}</notice>\n`
+
+						nativeInfo =
+							content.length > 0
+								? `Lines 1-${displayedLines}:\n${content}\n\nNote: ${truncateResult.notice}`
+								: `Note: ${truncateResult.notice}`
+					} else {
+						const lineRangeAttr = ` lines="1-${totalLines}"`
+						xmlInfo = totalLines > 0 ? `<content${lineRangeAttr}>\n${content}</content>\n` : `<content/>`
+
+						if (totalLines === 0) {
+							xmlInfo += `<notice>File is empty</notice>\n`
+							nativeInfo = "Note: File is empty"
 						} else {
-							console.error(
-								`[read_file] Unhandled error: ${error instanceof Error ? error.message : String(error)}`,
-							)
+							nativeInfo = `Lines 1-${totalLines}:\n${content}`
 						}
 					}
-					continue
+
+					await task.fileContextTracker.trackFileContext(relPath, "read_tool" as RecordSource)
+
+					updateFileResult(relPath, {
+						xmlContent: `<file><path>${relPath}</path>\n${xmlInfo}</file>`,
+						nativeContent: `File: ${relPath}\n${nativeInfo}`,
+					})
+				} catch (error) {
+					const errorMsg = error instanceof Error ? error.message : String(error)
+					updateFileResult(relPath, {
+						status: "error",
+						error: `Error reading file: ${errorMsg}`,
+						xmlContent: `<file><path>${relPath}</path><error>Error reading file: ${errorMsg}</error></file>`,
+						nativeContent: `File: ${relPath}\nError: Error reading file: ${errorMsg}`,
+					})
+					await task.say("error", `Error reading file ${relPath}: ${errorMsg}`)
 				}
+			}
 
-				// Handle files exceeding line threshold
-				if (maxReadFileLine > 0 && totalLines > maxReadFileLine) {
-					const content = addLineNumbers(await readLines(fullPath, maxReadFileLine - 1, 0))
-					const lineRangeAttr = ` lines="1-${maxReadFileLine}"`
-					let xmlInfo = `<content${lineRangeAttr}>\n${content}</content>\n`
+			// Check if any files had errors or were blocked and mark the turn as failed
+			const hasErrors = fileResults.some((result) => result.status === "error" || result.status === "blocked")
+			if (hasErrors) {
+				task.didToolFailInCurrentTurn = true
+			}
 
-					try {
-						const defResult = await parseSourceCodeDefinitionsForFile(fullPath, cline.rooIgnoreController)
-						if (defResult) {
-							xmlInfo += `<list_code_definition_names>${defResult}</list_code_definition_names>\n`
-						}
-						xmlInfo += `<notice>Showing only ${maxReadFileLine} of ${totalLines} total lines. Use line_range if you need to read more lines</notice>\n`
-						updateFileResult(relPath, {
-							xmlContent: `<file><path>${relPath}</path>\n${xmlInfo}</file>`,
-						})
-					} catch (error) {
-						if (error instanceof Error && error.message.startsWith("Unsupported language:")) {
-							console.warn(`[read_file] Warning: ${error.message}`)
-						} else {
-							console.error(
-								`[read_file] Unhandled error: ${error instanceof Error ? error.message : String(error)}`,
-							)
-						}
-					}
-					continue
+			// Build final result based on protocol
+			let finalResult: string
+			if (useNative) {
+				const nativeResults = fileResults
+					.filter((result) => result.nativeContent)
+					.map((result) => result.nativeContent)
+				finalResult = nativeResults.join("\n\n---\n\n")
+			} else {
+				const xmlResults = fileResults.filter((result) => result.xmlContent).map((result) => result.xmlContent)
+				finalResult = `<files>\n${xmlResults.join("\n")}\n</files>`
+			}
+
+			const fileImageUrls = fileResults
+				.filter((result) => result.imageDataUrl)
+				.map((result) => result.imageDataUrl as string)
+
+			let statusMessage = ""
+			let feedbackImages: any[] = []
+
+			const deniedWithFeedback = fileResults.find((result) => result.status === "denied" && result.feedbackText)
+
+			if (deniedWithFeedback && deniedWithFeedback.feedbackText) {
+				statusMessage = formatResponse.toolDeniedWithFeedback(deniedWithFeedback.feedbackText)
+				feedbackImages = deniedWithFeedback.feedbackImages || []
+			} else if (task.didRejectTool) {
+				statusMessage = formatResponse.toolDenied()
+			} else {
+				const approvedWithFeedback = fileResults.find(
+					(result) => result.status === "approved" && result.feedbackText,
+				)
+
+				if (approvedWithFeedback && approvedWithFeedback.feedbackText) {
+					statusMessage = formatResponse.toolApprovedWithFeedback(approvedWithFeedback.feedbackText)
+					feedbackImages = approvedWithFeedback.feedbackImages || []
 				}
+			}
 
-				// Handle normal file read with token budget validation
-				const modelInfo = cline.api.getModel().info
-				const { contextTokens } = cline.getTokenUsage()
-				const contextWindow = modelInfo.contextWindow
+			const allImages = [...feedbackImages, ...fileImageUrls]
 
-				// Validate if file fits within token budget
-				const budgetResult = await validateFileTokenBudget(fullPath, contextWindow, contextTokens || 0)
+			const finalModelSupportsImages = task.api.getModel().info.supportsImages ?? false
+			const imagesToInclude = finalModelSupportsImages ? allImages : []
 
-				let content = await extractTextFromFile(fullPath)
-				let xmlInfo = ""
+			if (statusMessage || imagesToInclude.length > 0) {
+				const result = formatResponse.toolResult(
+					statusMessage || finalResult,
+					imagesToInclude.length > 0 ? imagesToInclude : undefined,
+				)
 
-				if (budgetResult.shouldTruncate && budgetResult.maxChars !== undefined) {
-					// Truncate the content to fit budget or show preview for large files
-					const truncateResult = truncateFileContent(
-						content,
-						budgetResult.maxChars,
-						content.length,
-						budgetResult.isPreview,
-					)
-					content = truncateResult.content
-
-					// Reflect actual displayed line count after truncation (count ALL lines, including empty)
-					// Handle trailing newline: "line1\nline2\n" should be 2 lines, not 3
-					let displayedLines = content.length === 0 ? 0 : content.split(/\r?\n/).length
-					if (displayedLines > 0 && content.endsWith("\n")) {
-						displayedLines--
+				if (typeof result === "string") {
+					if (statusMessage) {
+						pushToolResult(`${result}\n${finalResult}`)
+					} else {
+						pushToolResult(result)
 					}
-					const lineRangeAttr = displayedLines > 0 ? ` lines="1-${displayedLines}"` : ""
-					xmlInfo = content.length > 0 ? `<content${lineRangeAttr}>\n${content}</content>\n` : `<content/>`
-					xmlInfo += `<notice>${truncateResult.notice}</notice>\n`
 				} else {
-					const lineRangeAttr = ` lines="1-${totalLines}"`
-					xmlInfo = totalLines > 0 ? `<content${lineRangeAttr}>\n${content}</content>\n` : `<content/>`
-
-					if (totalLines === 0) {
-						xmlInfo += `<notice>File is empty</notice>\n`
+					if (statusMessage) {
+						const textBlock = { type: "text" as const, text: finalResult }
+						pushToolResult([...result, textBlock])
+					} else {
+						pushToolResult(result)
 					}
 				}
+			} else {
+				pushToolResult(finalResult)
+			}
+		} catch (error) {
+			const relPath = fileEntries[0]?.path || "unknown"
+			const errorMsg = error instanceof Error ? error.message : String(error)
 
-				// Track file read
-				await cline.fileContextTracker.trackFileContext(relPath, "read_tool" as RecordSource)
-
-				updateFileResult(relPath, {
-					xmlContent: `<file><path>${relPath}</path>\n${xmlInfo}</file>`,
-				})
-			} catch (error) {
-				const errorMsg = error instanceof Error ? error.message : String(error)
+			if (fileResults.length > 0) {
 				updateFileResult(relPath, {
 					status: "error",
 					error: `Error reading file: ${errorMsg}`,
 					xmlContent: `<file><path>${relPath}</path><error>Error reading file: ${errorMsg}</error></file>`,
+					nativeContent: `File: ${relPath}\nError: Error reading file: ${errorMsg}`,
 				})
-				await handleError(`reading file ${relPath}`, error instanceof Error ? error : new Error(errorMsg))
 			}
-		}
 
-		// Generate final XML result from all file results
-		const xmlResults = fileResults.filter((result) => result.xmlContent).map((result) => result.xmlContent)
-		const filesXml = `<files>\n${xmlResults.join("\n")}\n</files>`
+			await task.say("error", `Error reading file ${relPath}: ${errorMsg}`)
 
-		// Collect all image data URLs from file results
-		const fileImageUrls = fileResults
-			.filter((result) => result.imageDataUrl)
-			.map((result) => result.imageDataUrl as string)
+			// Mark that a tool failed in this turn
+			task.didToolFailInCurrentTurn = true
 
-		// Process all feedback in a unified way without branching
-		let statusMessage = ""
-		let feedbackImages: any[] = []
-
-		// Handle denial with feedback (highest priority)
-		const deniedWithFeedback = fileResults.find((result) => result.status === "denied" && result.feedbackText)
-
-		if (deniedWithFeedback && deniedWithFeedback.feedbackText) {
-			statusMessage = formatResponse.toolDeniedWithFeedback(deniedWithFeedback.feedbackText)
-			feedbackImages = deniedWithFeedback.feedbackImages || []
-		}
-		// Handle generic denial
-		else if (cline.didRejectTool) {
-			statusMessage = formatResponse.toolDenied()
-		}
-		// Handle approval with feedback
-		else {
-			const approvedWithFeedback = fileResults.find(
-				(result) => result.status === "approved" && result.feedbackText,
-			)
-
-			if (approvedWithFeedback && approvedWithFeedback.feedbackText) {
-				statusMessage = formatResponse.toolApprovedWithFeedback(approvedWithFeedback.feedbackText)
-				feedbackImages = approvedWithFeedback.feedbackImages || []
-			}
-		}
-
-		// Combine all images: feedback images first, then file images
-		const allImages = [...feedbackImages, ...fileImageUrls]
-
-		// Re-check if the model supports images before including them, in case it changed during execution.
-		const finalModelSupportsImages = cline.api.getModel().info.supportsImages ?? false
-		const imagesToInclude = finalModelSupportsImages ? allImages : []
-
-		// Push the result with appropriate formatting
-		if (statusMessage || imagesToInclude.length > 0) {
-			// Always use formatResponse.toolResult when we have a status message or images
-			const result = formatResponse.toolResult(
-				statusMessage || filesXml,
-				imagesToInclude.length > 0 ? imagesToInclude : undefined,
-			)
-
-			// Handle different return types from toolResult
-			if (typeof result === "string") {
-				if (statusMessage) {
-					pushToolResult(`${result}\n${filesXml}`)
-				} else {
-					pushToolResult(result)
-				}
+			// Build final error result based on protocol
+			let errorResult: string
+			if (useNative) {
+				const nativeResults = fileResults
+					.filter((result) => result.nativeContent)
+					.map((result) => result.nativeContent)
+				errorResult = nativeResults.join("\n\n---\n\n")
 			} else {
-				// For block-based results, append the files XML as a text block if not already included
-				if (statusMessage) {
-					const textBlock = { type: "text" as const, text: filesXml }
-					pushToolResult([...result, textBlock])
-				} else {
-					pushToolResult(result)
-				}
+				const xmlResults = fileResults.filter((result) => result.xmlContent).map((result) => result.xmlContent)
+				errorResult = `<files>\n${xmlResults.join("\n")}\n</files>`
 			}
-		} else {
-			// No images or status message, just push the files XML
-			pushToolResult(filesXml)
+
+			pushToolResult(errorResult)
 		}
-	} catch (error) {
-		// Handle all errors using per-file format for consistency
-		const relPath = fileEntries[0]?.path || "unknown"
-		const errorMsg = error instanceof Error ? error.message : String(error)
+	}
 
-		// If we have file results, update the first one with the error
-		if (fileResults.length > 0) {
-			updateFileResult(relPath, {
-				status: "error",
-				error: `Error reading file: ${errorMsg}`,
-				xmlContent: `<file><path>${relPath}</path><error>Error reading file: ${errorMsg}</error></file>`,
-			})
+	getReadFileToolDescription(blockName: string, blockParams: any): string
+	getReadFileToolDescription(blockName: string, nativeArgs: { files: FileEntry[] }): string
+	getReadFileToolDescription(blockName: string, second: any): string {
+		// If native typed args ({ files: FileEntry[] }) were provided
+		if (second && typeof second === "object" && "files" in second && Array.isArray(second.files)) {
+			const paths = (second.files as FileEntry[]).map((f) => f?.path).filter(Boolean) as string[]
+			if (paths.length === 0) {
+				return `[${blockName} with no valid paths]`
+			} else if (paths.length === 1) {
+				return `[${blockName} for '${paths[0]}'. Reading multiple files at once is more efficient for the LLM. If other files are relevant to your current task, please read them simultaneously.]`
+			} else if (paths.length <= 3) {
+				const pathList = paths.map((p) => `'${p}'`).join(", ")
+				return `[${blockName} for ${pathList}]`
+			} else {
+				return `[${blockName} for ${paths.length} files]`
+			}
 		}
 
-		await handleError(`reading file ${relPath}`, error instanceof Error ? error : new Error(errorMsg))
+		// Fallback to legacy/XML or synthesized params
+		const blockParams = second as any
 
-		// Generate final XML result from all file results
-		const xmlResults = fileResults.filter((result) => result.xmlContent).map((result) => result.xmlContent)
+		if (blockParams?.args) {
+			try {
+				const parsed = parseXml(blockParams.args) as any
+				const files = Array.isArray(parsed.file) ? parsed.file : [parsed.file].filter(Boolean)
+				const paths = files.map((f: any) => f?.path).filter(Boolean) as string[]
 
-		pushToolResult(`<files>\n${xmlResults.join("\n")}\n</files>`)
+				if (paths.length === 0) {
+					return `[${blockName} with no valid paths]`
+				} else if (paths.length === 1) {
+					return `[${blockName} for '${paths[0]}'. Reading multiple files at once is more efficient for the LLM. If other files are relevant to your current task, please read them simultaneously.]`
+				} else if (paths.length <= 3) {
+					const pathList = paths.map((p) => `'${p}'`).join(", ")
+					return `[${blockName} for ${pathList}]`
+				} else {
+					return `[${blockName} for ${paths.length} files]`
+				}
+			} catch (error) {
+				console.error("Failed to parse read_file args XML for description:", error)
+				return `[${blockName} with unparsable args]`
+			}
+		} else if (blockParams?.path) {
+			return `[${blockName} for '${blockParams.path}'. Reading multiple files at once is more efficient for the LLM. If other files are relevant to your current task, please read them simultaneously.]`
+		} else if (blockParams?.files) {
+			// Back-compat: some paths may still synthesize params.files; try to parse if present
+			try {
+				const files = JSON.parse(blockParams.files)
+				if (Array.isArray(files) && files.length > 0) {
+					const paths = files.map((f: any) => f?.path).filter(Boolean) as string[]
+					if (paths.length === 1) {
+						return `[${blockName} for '${paths[0]}'. Reading multiple files at once is more efficient for the LLM. If other files are relevant to your current task, please read them simultaneously.]`
+					} else if (paths.length <= 3) {
+						const pathList = paths.map((p) => `'${p}'`).join(", ")
+						return `[${blockName} for ${pathList}]`
+					} else {
+						return `[${blockName} for ${paths.length} files]`
+					}
+				}
+			} catch (error) {
+				console.error("Failed to parse native files JSON for description:", error)
+				return `[${blockName} with unparsable files]`
+			}
+		}
+
+		return `[${blockName} with missing path/args/files]`
+	}
+
+	override async handlePartial(task: Task, block: ToolUse<"read_file">): Promise<void> {
+		const argsXmlTag = block.params.args
+		const legacyPath = block.params.path
+
+		let filePath = ""
+		if (argsXmlTag) {
+			const match = argsXmlTag.match(/<file>.*?<path>([^<]+)<\/path>/s)
+			if (match) filePath = match[1]
+		}
+		if (!filePath && legacyPath) {
+			filePath = legacyPath
+		}
+
+		if (!filePath && block.nativeArgs && "files" in block.nativeArgs && Array.isArray(block.nativeArgs.files)) {
+			const files = block.nativeArgs.files
+			if (files.length > 0 && files[0]?.path) {
+				filePath = files[0].path
+			}
+		}
+
+		const fullPath = filePath ? path.resolve(task.cwd, filePath) : ""
+		const sharedMessageProps: ClineSayTool = {
+			tool: "readFile",
+			path: getReadablePath(task.cwd, filePath),
+			isOutsideWorkspace: filePath ? isPathOutsideWorkspace(fullPath) : false,
+		}
+		const partialMessage = JSON.stringify({
+			...sharedMessageProps,
+			content: undefined,
+		} satisfies ClineSayTool)
+		await task.ask("tool", partialMessage, block.partial).catch(() => {})
 	}
 }
+
+export const readFileTool = new ReadFileTool()

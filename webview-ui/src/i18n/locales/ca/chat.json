@@ -85,24 +85,17 @@
 		"tooltip": "Cancel·la l'operació actual"
 	},
 	"scrollToBottom": "Desplaça't al final del xat",
-	"about": "Genera, refactoritza i depura codi amb l'ajuda de la IA. Consulta la nostra <DocsLink>documentació</DocsLink> per obtenir més informació.",
-	"onboarding": "<strong> La vostra llista de tasques en aquest espai de treball està buida. </strong> Comença escrivint una tasca a continuació. \nNo esteu segur per on començar? \nMés informació sobre què pot fer Roo als documents.",
+	"about": "Roo Code és tot un equip de desenvolupament d'IA al teu editor.",
+	"docs": "Consulta els nostres <DocsLink>documents</DocsLink> per a més informació.",
+	"onboarding": "La teva llista de tasques en aquest espai de treball està buida.",
 	"rooTips": {
-		"boomerangTasks": {
-			"title": "Orquestració de Tasques",
-			"description": "Divideix les tasques en parts més petites i manejables."
-		},
-		"stickyModels": {
-			"title": "Modes persistents",
-			"description": "Cada mode recorda el vostre darrer model utilitzat"
-		},
-		"tools": {
-			"title": "Eines",
-			"description": "Permet que la IA resolgui problemes navegant per la web, executant ordres i molt més."
-		},
 		"customizableModes": {
 			"title": "Modes personalitzables",
-			"description": "Personalitats especialitzades amb comportaments propis i models assignats"
+			"description": "Persones especialitzades que es mantenen en la tasca i compleixen."
+		},
+		"modelAgnostic": {
+			"title": "Porta el teu propi model",
+			"description": "Fes servir la teva pròpia clau de proveïdor o fins i tot executa inferència local — sense sobrepreus, sense bloquejos, sense restriccions"
 		}
 	},
 	"selectMode": "Selecciona el mode d'interacció",
@@ -298,20 +291,21 @@
 			"goToSettingsButton": "Anar a Configuració"
 		},
 		"release": {
-			"heading": "Novetats a l'extensió:",
-			"fileReading": "Lectura intel·ligent de fitxers que evita sobrepassaments de context",
-			"browserUse": "Eina de navegador habilitada per a tots els models amb capacitat d'imatge",
-			"bugFixes": "Moltes correccions d'errors i actualitzacions de models"
+			"heading": "Novetats:",
+			"browserUse": "Browser Use 2.0 millora l'experiència de navegació dins del xat amb sessions persistents, comentaris més clars, un panell de navegador dedicat i descripcions d'accions més naturals",
+			"cloudPaid": "El proveïdor de Roo Code Cloud ara ofereix models de pagament: compra crèdits i utilitza'ls tant per a agents al núvol com per a inferència"
 		},
 		"cloudAgents": {
 			"heading": "Novetats al núvol:",
-			"feature": "Us presentem el primer Agent al Núvol de Roo Code, el <bold>Revisor de PR</bold>.",
-			"description": "Executa Roo al núvol, oferint revisions de codi d'altíssima qualitat a l'instant. L'hem utilitzat intensament per construir Roo i ara també està disponible per a la comunitat.",
-			"createAgentButton": "Prova el Revisor de PR"
+			"specialized": "Presentem <bold>Explainer</bold>, <bold>Planner</bold> i <bold>Coder</bold> - tres agents al núvol especialitzats per millorar els teus fluxos de treball.",
+			"description": "Els agents treballen junts al núvol i es poden activar des del web o mitjançant Slack.",
+			"tryButton": "Prova els Agents al Núvol"
 		},
+		"careers": "A més, <careersLink>estem contractant!</careersLink>",
 		"socialLinks": "Uneix-te a nosaltres a <xLink>X</xLink>, <discordLink>Discord</discordLink>, o <redditLink>r/RooCode</redditLink> 🚀"
 	},
 	"browser": {
+		"session": "Sessió del navegador",
 		"rooWantsToUse": "Roo vol utilitzar el navegador",
 		"consoleLogs": "Registres de consola",
 		"noNewLogs": "(Cap registre nou)",
@@ -324,12 +318,14 @@
 		},
 		"sessionStarted": "Sessió de navegador iniciada",
 		"actions": {
-			"title": "Acció de navegació: ",
+			"title": "Acció del navegador: ",
 			"launch": "Iniciar navegador a {{url}}",
 			"click": "Clic ({{coordinate}})",
 			"type": "Escriure \"{{text}}\"",
+			"press": "Prem {{key}}",
 			"scrollDown": "Desplaçar avall",
 			"scrollUp": "Desplaçar amunt",
+			"hover": "Plana sobre ({{coordinate}})",
 			"close": "Tancar navegador"
 		}
 	},
@@ -428,5 +424,12 @@
 		"problems": "Problemes",
 		"terminal": "Terminal",
 		"url": "Enganxa la URL per obtenir-ne el contingut"
+	},
+	"todo": {
+		"partial": "{{completed}} de {{total}} tasques pendents fetes",
+		"complete": "{{total}} tasques pendents fetes",
+		"updated": "S'ha actualitzat la llista de tasques pendents",
+		"completed": "Completat",
+		"started": "Iniciat"
 	}
 }

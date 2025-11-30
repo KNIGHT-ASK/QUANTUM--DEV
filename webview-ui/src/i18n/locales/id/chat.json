@@ -99,24 +99,17 @@
 		"tooltip": "Batalkan operasi saat ini"
 	},
 	"scrollToBottom": "Gulir ke bawah chat",
-	"about": "Buat, refaktor, dan debug kode dengan bantuan AI.<br />Lihat <DocsLink>dokumentasi</DocsLink> kami untuk mempelajari lebih lanjut.",
-	"onboarding": "Daftar tugas di workspace ini kosong.",
+	"about": "Roo Code adalah seluruh tim pengembang AI di editor Anda.",
+	"docs": "Lihat <DocsLink>dokumentasi</DocsLink> kami untuk mempelajari lebih lanjut.",
+	"onboarding": "Daftar tugas Anda di ruang kerja ini kosong.",
 	"rooTips": {
-		"boomerangTasks": {
-			"title": "Orkestrasi Tugas",
-			"description": "Bagi tugas menjadi bagian-bagian kecil yang dapat dikelola"
-		},
-		"stickyModels": {
-			"title": "Model Sticky",
-			"description": "Setiap mode mengingat model terakhir yang kamu gunakan"
-		},
-		"tools": {
-			"title": "Tools",
-			"description": "Izinkan AI menyelesaikan masalah dengan browsing web, menjalankan perintah, dan lainnya"
-		},
 		"customizableModes": {
-			"title": "Mode yang Dapat Disesuaikan",
-			"description": "Persona khusus dengan perilaku dan model yang ditugaskan sendiri"
+			"title": "Mode yang dapat disesuaikan",
+			"description": "Persona khusus yang tetap mengerjakan tugas dan memberikan hasil."
+		},
+		"modelAgnostic": {
+			"title": "Bawa model Anda sendiri",
+			"description": "Gunakan kunci penyedia Anda sendiri atau bahkan jalankan inferensi lokal — tanpa markup, tanpa lock-in, tanpa batasan"
 		}
 	},
 	"selectMode": "Pilih mode untuk interaksi",
@@ -310,17 +303,17 @@
 			"goToSettingsButton": "Pergi ke Pengaturan"
 		},
 		"release": {
-			"heading": "Baru di Ekstensi:",
-			"fileReading": "Pembacaan file cerdas yang menghindari kelebihan konteks",
-			"browserUse": "Tool penggunaan browser diaktifkan untuk semua model yang mendukung gambar",
-			"bugFixes": "Banyak perbaikan bug dan pembaruan model"
+			"heading": "Terbaru:",
+			"browserUse": "Browser Use 2.0 meningkatkan pengalaman browsing dalam chat dengan sesi persisten, feedback yang lebih jelas, panel browser khusus, dan deskripsi aksi yang lebih alami",
+			"cloudPaid": "Provider Roo Code Cloud sekarang menawarkan model berbayar: beli kredit dan gunakan untuk cloud agents dan inference"
 		},
 		"cloudAgents": {
 			"heading": "Baru di Cloud:",
-			"feature": "Memperkenalkan Agen Cloud pertama Roo Code, <bold>PR Reviewer</bold>.",
-			"description": "Ini menjalankan Roo di cloud, memberikan tinjauan kode berkualitas sangat tinggi secara instan. Kami telah menggunakannya secara intensif untuk membangun Roo dan sekarang juga tersedia untuk komunitas.",
-			"createAgentButton": "Coba PR Reviewer"
+			"specialized": "Memperkenalkan <bold>Explainer</bold>, <bold>Planner</bold>, dan <bold>Coder</bold> - tiga agen cloud khusus untuk meningkatkan alur kerja Anda.",
+			"description": "Agen bekerja bersama di cloud dan dapat dipicu dari web atau melalui Slack.",
+			"tryButton": "Coba Agen Cloud"
 		},
+		"careers": "Juga, <careersLink>kami sedang merekrut!</careersLink>",
 		"socialLinks": "Bergabunglah dengan kami di <xLink>X</xLink>, <discordLink>Discord</discordLink>, atau <redditLink>r/RooCode</redditLink> 🚀"
 	},
 	"reasoning": {
@@ -333,6 +326,7 @@
 		"countdownDisplay": "{{count}}dtk"
 	},
 	"browser": {
+		"session": "Sesi Browser",
 		"rooWantsToUse": "Roo ingin menggunakan browser",
 		"consoleLogs": "Log Konsol",
 		"noNewLogs": "(Tidak ada log baru)",
@@ -345,12 +339,14 @@
 		},
 		"sessionStarted": "Sesi Browser Dimulai",
 		"actions": {
-			"title": "Aksi Browse: ",
+			"title": "Aksi Browser: ",
 			"launch": "Luncurkan browser di {{url}}",
 			"click": "Klik ({{coordinate}})",
 			"type": "Ketik \"{{text}}\"",
+			"press": "Tekan {{key}}",
 			"scrollDown": "Gulir ke bawah",
 			"scrollUp": "Gulir ke atas",
+			"hover": "Arahkan ({{coordinate}})",
 			"close": "Tutup browser"
 		}
 	},
@@ -434,5 +430,12 @@
 	"slashCommand": {
 		"wantsToRun": "Roo ingin menjalankan perintah slash",
 		"didRun": "Roo telah menjalankan perintah slash"
+	},
+	"todo": {
+		"partial": "{{completed}} dari {{total}} to-do selesai",
+		"complete": "{{total}} to-do selesai",
+		"updated": "Memperbarui daftar to-do",
+		"completed": "Selesai",
+		"started": "Dimulai"
 	}
 }

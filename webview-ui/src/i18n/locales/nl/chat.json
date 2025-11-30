@@ -85,24 +85,17 @@
 		"tooltip": "Annuleer de huidige bewerking"
 	},
 	"scrollToBottom": "Scroll naar onderaan de chat",
-	"about": "Genereer, refactor en debug code met AI-assistentie. Bekijk onze <DocsLink>documentatie</DocsLink> voor meer informatie.",
+	"about": "Roo Code is een heel AI-ontwikkelteam in je editor.",
+	"docs": "Bekijk onze <DocsLink>documentatie</DocsLink> voor meer informatie.",
 	"onboarding": "Je takenlijst in deze werkruimte is leeg.",
 	"rooTips": {
-		"boomerangTasks": {
-			"title": "Taak Orchestratie",
-			"description": "Splits taken op in kleinere, beheersbare delen"
-		},
-		"stickyModels": {
-			"title": "Vastgezette modellen",
-			"description": "Elke modus onthoudt je laatst gebruikte model"
-		},
-		"tools": {
-			"title": "Tools",
-			"description": "Laat de AI problemen oplossen door te browsen, commando's uit te voeren en meer"
-		},
 		"customizableModes": {
 			"title": "Aanpasbare modi",
-			"description": "Gespecialiseerde persona's met hun eigen gedrag en toegewezen modellen"
+			"description": "Gespecialiseerde persona's die op schema blijven en presteren."
+		},
+		"modelAgnostic": {
+			"title": "Breng je eigen model mee",
+			"description": "Gebruik je eigen providersleutel of voer zelfs lokale inferentie uit — geen opslag, geen lock-in, geen beperkingen"
 		}
 	},
 	"selectMode": "Selecteer modus voor interactie",
@@ -283,17 +276,17 @@
 			"goToSettingsButton": "Ga naar Instellingen"
 		},
 		"release": {
-			"heading": "Nieuw in de extensie:",
-			"fileReading": "Intelligent bestanden lezen dat contextoverloop voorkomt",
-			"browserUse": "Browsertool ingeschakeld voor alle modellen met afbeeldingscapaciteit",
-			"bugFixes": "Veel bugfixes en modelupdates"
+			"heading": "Nieuw:",
+			"browserUse": "Browser Use 2.0 verbetert de browse-ervaring in chat met persistente sessies, duidelijkere feedback, een toegewijd browserpaneel en natuurlijkere actiebeschrijvingen",
+			"cloudPaid": "De Roo Code Cloud provider biedt nu betaalde modellen: koop credits en gebruik ze voor zowel cloud agents als inference"
 		},
 		"cloudAgents": {
 			"heading": "Nieuw in de Cloud:",
-			"feature": "Maak kennis met de eerste Cloud Agent van Roo Code, de <bold>PR Reviewer</bold>.",
-			"description": "Het draait Roo in de cloud en geeft direct zeer hoogwaardige codebeoordelingen. We hebben het intensief gebruikt om Roo te bouwen en nu is het ook beschikbaar voor de community.",
-			"createAgentButton": "Probeer PR Reviewer"
+			"specialized": "Introductie van <bold>Explainer</bold>, <bold>Planner</bold> en <bold>Coder</bold> - drie gespecialiseerde cloud-agents om je workflows te verbeteren.",
+			"description": "De agents werken samen in de cloud en kunnen worden geactiveerd vanaf het web of via Slack.",
+			"tryButton": "Probeer Cloud-agents"
 		},
+		"careers": "Ook, <careersLink>we nemen aan!</careersLink>",
 		"socialLinks": "Sluit je bij ons aan op <xLink>X</xLink>, <discordLink>Discord</discordLink>, of <redditLink>r/RooCode</redditLink> 🚀"
 	},
 	"reasoning": {
@@ -312,6 +305,7 @@
 		"countdownDisplay": "{{count}}s"
 	},
 	"browser": {
+		"session": "Browsersessie",
 		"rooWantsToUse": "Roo wil de browser gebruiken",
 		"consoleLogs": "Console-logboeken",
 		"noNewLogs": "(Geen nieuwe logboeken)",
@@ -324,12 +318,14 @@
 		},
 		"sessionStarted": "Browsersessie gestart",
 		"actions": {
-			"title": "Browse-actie: ",
+			"title": "Browseractie: ",
 			"launch": "Browser starten op {{url}}",
 			"click": "Klik ({{coordinate}})",
 			"type": "Typ \"{{text}}\"",
+			"press": "Druk op {{key}}",
 			"scrollDown": "Scroll naar beneden",
 			"scrollUp": "Scroll naar boven",
+			"hover": "Zweven ({{coordinate}})",
 			"close": "Browser sluiten"
 		}
 	},
@@ -428,5 +424,12 @@
 	"slashCommand": {
 		"wantsToRun": "Roo wil een slash commando uitvoeren",
 		"didRun": "Roo heeft een slash commando uitgevoerd"
+	},
+	"todo": {
+		"partial": "{{completed}} van {{total}} to-do's voltooid",
+		"complete": "{{total}} to-do's voltooid",
+		"updated": "De to-do-lijst is bijgewerkt",
+		"completed": "Voltooid",
+		"started": "Gestart"
 	}
 }

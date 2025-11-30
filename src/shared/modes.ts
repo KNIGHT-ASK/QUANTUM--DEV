@@ -44,7 +44,7 @@ export function doesFileMatchRegex(filePath: string, pattern: string): boolean {
 }
 
 // Helper to get all tools for a mode
-export function getToolsForMode(mode: Mode, groups: readonly GroupEntry[]): string[] {
+export function getToolsForMode(groups: readonly GroupEntry[]): string[] {
 	const tools = new Set<string>()
 
 	// Add tools from each group
@@ -61,10 +61,10 @@ export function getToolsForMode(mode: Mode, groups: readonly GroupEntry[]): stri
 }
 
 // Main modes configuration as an ordered array
-export const modes: ModeConfig[] = [...DEFAULT_MODES]
+export const modes = DEFAULT_MODES
 
 // Export the default mode slug
-export const defaultModeSlug: string = modes[0].slug
+export const defaultModeSlug = modes[0].slug
 
 // Helper functions
 export function getModeBySlug(slug: string, customModes?: ModeConfig[]): ModeConfig | undefined {
@@ -176,6 +176,10 @@ export function isToolAllowedForMode(
 	if (ALWAYS_AVAILABLE_TOOLS.includes(tool as any)) {
 		return true
 	}
+
+	// Check if this is a dynamic MCP tool (mcp_serverName_toolName)
+	// These should be allowed if the mcp group is allowed for the mode
+	const isDynamicMcpTool = tool.startsWith("mcp_")
 	if (experiments && Object.values(EXPERIMENT_IDS).includes(tool as ExperimentId)) {
 		if (!experiments[tool]) {
 			return false
@@ -203,6 +207,12 @@ export function isToolAllowedForMode(
 		const options = getGroupOptions(group)
 
 		const groupConfig = TOOL_GROUPS[groupName]
+
+		// Check if this is a dynamic MCP tool and the mcp group is allowed
+		if (isDynamicMcpTool && groupName === "mcp") {
+			// Dynamic MCP tools are allowed if the mcp group is in the mode's groups
+			return true
+		}
 
 		// If the tool isn't in this group's tools, continue to next group
 		if (!groupConfig.tools.includes(tool)) {
@@ -271,7 +281,7 @@ export function isToolAllowedForMode(
 // Create the mode-specific default prompts
 export const defaultPrompts: Readonly<CustomModePrompts> = Object.freeze(
 	Object.fromEntries(
-		modes.map((mode: ModeConfig) => [
+		modes.map((mode) => [
 			mode.slug,
 			{
 				roleDefinition: mode.roleDefinition,
@@ -310,7 +320,7 @@ export async function getFullModeDetails(
 	},
 ): Promise<ModeConfig> {
 	// First get the base mode config from custom modes or built-in modes
-	const baseMode = getModeBySlug(modeSlug, customModes) || modes.find((m: ModeConfig) => m.slug === modeSlug) || modes[0]
+	const baseMode = getModeBySlug(modeSlug, customModes) || modes.find((m) => m.slug === modeSlug) || modes[0]
 
 	// Check for any prompt component overrides
 	const promptComponent = customModePrompts?.[modeSlug]
