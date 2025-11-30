@@ -913,8 +913,8 @@ importers:
         specifier: ^1.0.21
         version: 1.0.21
       tmp:
-        specifier: ^0.2.3
-        version: 0.2.4
+        specifier: ^0.2.5
+        version: 0.2.5
       tree-sitter-wasms:
         specifier: ^0.1.12
         version: 0.1.12
@@ -2619,8 +2619,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@petamoriken/float16@3.9.2':
-    resolution: {integrity: sha512-VgffxawQde93xKxT3qap3OH+meZf7VaSB5Sqd4Rqc+FP5alWbpOyan/7tRbOAvynjpG3GpdtAuGU/NdhQpmrog==}
+  '@petamoriken/float16@3.9.3':
+    resolution: {integrity: sha512-8awtpHXCx/bNpFt4mt2xdkgtgVvKqty8VbjHI/WWWQuEw+KLzFot3f4+LkQY9YmOtq7A5GdOnqoIC8Pdygjk2g==}
 
   '@pkgjs/parseargs@0.11.0':
     resolution: {integrity: sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg==}
@@ -4255,6 +4255,9 @@ packages:
 
   '@types/node@20.17.57':
     resolution: {integrity: sha512-f3T4y6VU4fVQDKVqJV4Uppy8c1p/sVvS3peyqxyWnzkqXFJLRU7Y1Bl7rMS1Qe9z0v4M6McY0Fp9yBsgHJUsWQ==}
+
+  '@types/node@20.19.25':
+    resolution: {integrity: sha512-ZsJzA5thDQMSQO788d7IocwwQbI8B5OPzmqNvpf3NY/+MHDAS759Wo0gd2WQeXYt5AAAQjzcrTVC6SKCuYgoCQ==}
 
   '@types/node@24.2.1':
     resolution: {integrity: sha512-DRh5K+ka5eJic8CjH7td8QpYEV6Zo10gfRkjHCO3weqZHWDtAaSTFtl4+VMqOJ4N5jcuhZ9/l+yy8rVgw7BQeQ==}
@@ -9231,6 +9234,11 @@ packages:
     engines: {node: '>=10'}
     hasBin: true
 
+  semver@7.7.3:
+    resolution: {integrity: sha512-SdsKMrI9TdgjdweUSR9MweHA4EJ8YxHn8DFaDisvhVlUOe4BF1tLD7GAj0lIqWVl+dPb/rExr0Btby5loQm20Q==}
+    engines: {node: '>=10'}
+    hasBin: true
+
   send@1.2.0:
     resolution: {integrity: sha512-uaW0WwXKpL9blXE2o0bRhoL2EGXIrZxQ2ZQ4mgcfoBxdFmQold+qWsD2jLrfZ0trjKL6vOw0j//eAwcALFjKSw==}
     engines: {node: '>= 18'}
@@ -9796,12 +9804,8 @@ packages:
     resolution: {integrity: sha512-WMi/OQ2axVTf/ykqCQgXiIct+mSQDFdH2fkwhPwgEwvJ1kSzZRiinb0zF2Xb8u4+OqPChmyI6MEu4EezNJz+FQ==}
     hasBin: true
 
-  tmp@0.2.3:
-    resolution: {integrity: sha512-nZD7m9iCPC5g0pYmcaxogYKggSfLsdxl8of3Q/oIbqCqLLIO9IAF0GWjX1z9NZRHPiXv8Wex4yDCaZsgEw0Y8w==}
-    engines: {node: '>=14.14'}
-
-  tmp@0.2.4:
-    resolution: {integrity: sha512-UdiSoX6ypifLmrfQ/XfiawN6hkjSBpCjhKxxZcWlUUmoXLaCKQU0bx4HF/tdDK2uzRuchf1txGvrWBzYREssoQ==}
+  tmp@0.2.5:
+    resolution: {integrity: sha512-voyz6MApa1rQGUxT3E+BK7/ROe8itEx7vD8/HEvt4xwXucvQ5G5oeEiHkmHZJuBO21RpOf+YYm9MOivj709jow==}
     engines: {node: '>=14.14'}
 
   to-regex-range@5.0.1:
@@ -10047,6 +10051,9 @@ packages:
 
   undici-types@6.19.8:
     resolution: {integrity: sha512-ve2KP6f/JnbPBFyobGHuerC9g1FYGn/F8n1LWTwNxCEzd6IfqTwUQcNXgEtmmQ6DlRrC1hrSrBnCZPokRrDHjw==}
+
+  undici-types@6.21.0:
+    resolution: {integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==}
 
   undici-types@7.10.0:
     resolution: {integrity: sha512-t5Fy/nfn+14LuOc2KNYg75vZqClpAiqscVvMygNnlsHBFpSXdJaYtXMcdNLpl/Qvc3P2cB3s6lOV51nqsFq4ag==}
@@ -12530,7 +12537,7 @@ snapshots:
   '@oxc-resolver/binding-win32-x64-msvc@11.2.0':
     optional: true
 
-  '@petamoriken/float16@3.9.2':
+  '@petamoriken/float16@3.9.3':
     optional: true
 
   '@pkgjs/parseargs@0.11.0':
@@ -14330,6 +14337,11 @@ snapshots:
     dependencies:
       undici-types: 6.19.8
 
+  '@types/node@20.19.25':
+    dependencies:
+      undici-types: 6.21.0
+    optional: true
+
   '@types/node@24.2.1':
     dependencies:
       undici-types: 7.10.0
@@ -14399,7 +14411,7 @@ snapshots:
 
   '@types/ws@8.18.1':
     dependencies:
-      '@types/node': 20.17.57
+      '@types/node': 20.19.25
     optional: true
 
   '@types/yargs-parser@21.0.3': {}
@@ -14784,7 +14796,7 @@ snapshots:
       parse-semver: 1.1.1
       read: 1.0.7
       semver: 7.7.2
-      tmp: 0.2.3
+      tmp: 0.2.5
       typed-rest-client: 1.8.11
       url-join: 4.0.1
       xml2js: 0.5.0
@@ -16538,7 +16550,7 @@ snapshots:
       jszip: 3.10.1
       readable-stream: 3.6.2
       saxes: 5.0.1
-      tmp: 0.2.4
+      tmp: 0.2.5
       unzipper: 0.10.14
       uuid: 8.3.2
 
@@ -16955,10 +16967,10 @@ snapshots:
 
   gel@2.1.0:
     dependencies:
-      '@petamoriken/float16': 3.9.2
+      '@petamoriken/float16': 3.9.3
       debug: 4.4.3
       env-paths: 3.0.0
-      semver: 7.7.2
+      semver: 7.7.3
       shell-quote: 1.8.3
       which: 4.0.0
     transitivePeerDependencies:
@@ -19173,7 +19185,7 @@ snapshots:
       is-ci: 2.0.0
       leven: 3.1.0
       semver: 7.7.2
-      tmp: 0.2.3
+      tmp: 0.2.5
       yauzl-promise: 4.0.0
     transitivePeerDependencies:
       - bare-buffer
@@ -20224,6 +20236,9 @@ snapshots:
 
   semver@7.7.2: {}
 
+  semver@7.7.3:
+    optional: true
+
   send@1.2.0:
     dependencies:
       debug: 4.4.3
@@ -20886,9 +20901,7 @@ snapshots:
     dependencies:
       tldts-core: 6.1.86
 
-  tmp@0.2.3: {}
-
-  tmp@0.2.4: {}
+  tmp@0.2.5: {}
 
   to-regex-range@5.0.1:
     dependencies:
@@ -21133,6 +21146,9 @@ snapshots:
   undici-types@5.26.5: {}
 
   undici-types@6.19.8: {}
+
+  undici-types@6.21.0:
+    optional: true
 
   undici-types@7.10.0: {}
 
