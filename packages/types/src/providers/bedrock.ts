@@ -4,7 +4,7 @@ import type { ModelInfo } from "../model.js"
 
 export type BedrockModelId = keyof typeof bedrockModels
 
-export const bedrockDefaultModelId: BedrockModelId = "anthropic.claude-sonnet-4-20250514-v1:0"
+export const bedrockDefaultModelId: BedrockModelId = "anthropic.claude-sonnet-4-5-20250929-v1:0"
 
 export const bedrockDefaultPromptRouterModelId: BedrockModelId = "anthropic.claude-3-sonnet-20240229-v1:0"
 
@@ -101,6 +101,20 @@ export const bedrockModels = {
 		outputPrice: 75.0,
 		cacheWritesPrice: 18.75,
 		cacheReadsPrice: 1.5,
+		minTokensPerCachePoint: 1024,
+		maxCachePoints: 4,
+		cachableFields: ["system", "messages", "tools"],
+	},
+	"anthropic.claude-opus-4-5-20251101-v1:0": {
+		maxTokens: 8192,
+		contextWindow: 200_000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsReasoningBudget: true,
+		inputPrice: 5.0,
+		outputPrice: 25.0,
+		cacheWritesPrice: 6.25,
+		cacheReadsPrice: 0.5,
 		minTokensPerCachePoint: 1024,
 		maxCachePoints: 4,
 		cachableFields: ["system", "messages", "tools"],
@@ -401,17 +415,22 @@ export const BEDROCK_DEFAULT_CONTEXT = 128_000
 // https://docs.aws.amazon.com/bedrock/latest/userguide/inference-profiles-support.html
 // This mapping is pre-ordered by pattern length (descending) to ensure more specific patterns match first
 export const AWS_INFERENCE_PROFILE_MAPPING: Array<[string, string]> = [
-	// US Government Cloud → ug. inference profile (most specific prefix first)
+	// Australia regions (Sydney and Melbourne) → au. inference profile (most specific - 14 chars)
+	["ap-southeast-2", "au."],
+	["ap-southeast-4", "au."],
+	// Japan regions (Tokyo and Osaka) → jp. inference profile (13 chars)
+	["ap-northeast-", "jp."],
+	// US Government Cloud → ug. inference profile (7 chars)
 	["us-gov-", "ug."],
-	// Americas regions → us. inference profile
+	// Americas regions → us. inference profile (3 chars)
 	["us-", "us."],
-	// Europe regions → eu. inference profile
+	// Europe regions → eu. inference profile (3 chars)
 	["eu-", "eu."],
-	// Asia Pacific regions → apac. inference profile
+	// Asia Pacific regions → apac. inference profile (3 chars)
 	["ap-", "apac."],
-	// Canada regions → ca. inference profile
+	// Canada regions → ca. inference profile (3 chars)
 	["ca-", "ca."],
-	// South America regions → sa. inference profile
+	// South America regions → sa. inference profile (3 chars)
 	["sa-", "sa."],
 ]
 
@@ -447,4 +466,17 @@ export const BEDROCK_REGIONS = [
 export const BEDROCK_1M_CONTEXT_MODEL_IDS = [
 	"anthropic.claude-sonnet-4-20250514-v1:0",
 	"anthropic.claude-sonnet-4-5-20250929-v1:0",
+] as const
+
+// Amazon Bedrock models that support Global Inference profiles
+// As of Nov 2025, AWS supports Global Inference for:
+// - Claude Sonnet 4
+// - Claude Sonnet 4.5
+// - Claude Haiku 4.5
+// - Claude Opus 4.5
+export const BEDROCK_GLOBAL_INFERENCE_MODEL_IDS = [
+	"anthropic.claude-sonnet-4-20250514-v1:0",
+	"anthropic.claude-sonnet-4-5-20250929-v1:0",
+	"anthropic.claude-haiku-4-5-20251001-v1:0",
+	"anthropic.claude-opus-4-5-20251101-v1:0",
 ] as const
