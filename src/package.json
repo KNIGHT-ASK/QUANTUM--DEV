@@ -508,7 +508,7 @@
 		"proper-lockfile": "^4.1.2",
 		"ps-tree": "^1.2.0",
 		"puppeteer-chromium-resolver": "^24.0.0",
-		"puppeteer-core": "^23.4.0",
+		"puppeteer-core": "^24.31.0",
 		"reconnecting-eventsource": "^1.6.4",
 		"safe-stable-stringify": "^2.5.0",
 		"sanitize-filename": "^1.6.3",
